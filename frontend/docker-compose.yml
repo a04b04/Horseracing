@@ -1,0 +1,10 @@
+services:
+  horse-racing:
+    build:
+      context: .
+      args:
+        VITE_BOOKIE_SERVICE_TOKEN: ${VITE_BOOKIE_SERVICE_TOKEN}
+    container_name: grand-national-disaster
+    ports:
+      - "80:80"
+    restart: unless-stopped
