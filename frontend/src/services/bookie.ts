@@ -8,6 +8,8 @@ interface BookieUser {
   balance: number;
 }
 
+type TransactionType = "win" | "loss" | "hold" | "return";
+
 function getLoggedInUser(): BookieUser {
   const stored = sessionStorage.getItem("bookieUser");
 
@@ -25,7 +27,7 @@ function getLoggedInUser(): BookieUser {
 }
 
 async function transferCredits(
-  recipient: string,
+  type: TransactionType,
   amount: number
 ): Promise<void> {
   const user = getLoggedInUser();
@@ -34,77 +36,67 @@ async function transferCredits(
     throw new Error("Invalid transaction amount.");
   }
 
-  const response = await fetch(
-    `${API_URL}/transactions/service/${encodeURIComponent(recipient)}`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        username: user.username,
-        password: user.password,
-        serviceToken: SERVICE_TOKEN,
-        amount,
-      }),
-    }
-  );
+  if (!SERVICE_TOKEN) {
+    throw new Error("Bookie service token is missing.");
+  }
 
-    if (!response.ok) {
+  const response = await fetch(`${API_URL}/services/transaction`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      username: user.username,
+      password: user.password,
+      serviceToken: SERVICE_TOKEN,
+      amount,
+      type,
+    }),
+  });
+
+  if (!response.ok) {
     const errorBody = await response.text();
 
     console.error("Bookie API response:", {
-        status: response.status,
-        body: errorBody,
+      status: response.status,
+      body: errorBody,
     });
 
     throw new Error(
-        `Bookie transaction failed: ${response.status} - ${errorBody}`
+      `Bookie transaction failed: ${response.status} - ${errorBody}`
     );
-    }
+  }
 }
 
-// Player → HorseBetting
+// Player places a bet
 export async function placeBookieBet(amount: number): Promise<void> {
-  await transferCredits("Horse", amount);
+  await transferCredits("loss", amount);
 }
 
-// HorseBetting → Player
+// Player receives winnings
 export async function payBookieWinnings(amount: number): Promise<void> {
-  const user = getLoggedInUser();
-  await transferCredits(user.username, amount);
+  await transferCredits("win", amount);
 }
 
-
+// Retrieve current player balance
 export async function getBookieBalance(): Promise<number> {
   const user = getLoggedInUser();
 
-  let page = 1;
+  const response = await fetch(
+    `${API_URL}/users/${encodeURIComponent(user.username)}`
+  );
 
-  while (true) {
-    const response = await fetch(
-      `${API_URL}/users?page=${page}&limit=100`
-    );
-
-    if (!response.ok) {
-      throw new Error("Failed to fetch Bookie balance.");
-    }
-
-    const result = await response.json();
-
-    const foundUser = result.data.find(
-      (account: { username: string; balance: string | number }) =>
-        account.username === user.username
-    );
-
-    if (foundUser) {
-      return Number(foundUser.balance);
-    }
-
-    if (page >= result.totalPages) {
-      throw new Error("Bookie account not found.");
-    }
-
-    page++;
+  if (!response.ok) {
+    throw new Error(`Failed to fetch Bookie balance: ${response.status}`);
   }
+
+  const result = await response.json();
+
+  const balance = Number(result.data?.balance ?? result.balance);
+
+  if (!Number.isFinite(balance)) {
+    throw new Error("Invalid balance returned by Bookie API.");
+  }
+
+  return balance;
 }
